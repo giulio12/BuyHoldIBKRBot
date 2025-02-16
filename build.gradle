@@ -7,9 +7,14 @@ version = '1.0-SNAPSHOT'
 
 repositories {
     mavenCentral()
+    flatDir {
+        dirs 'libs'
+    }
 }
 
 dependencies {
+    implementation 'org.ojalgo:ojalgo:55.1.2'
+    implementation files('libs/TwsApi_debug.jar')
     testImplementation platform('org.junit:junit-bom:5.10.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
 }
