@@ -3,64 +3,41 @@ package ch.ibkrbot;
 import com.ib.client.Contract;
 import com.ib.client.Decimal;
 
-public class Position {
-    public String symbol;
-    public String accountName;
-    public Decimal position;
-    public double marketPrice;
-    public double marketValue;
-    public double averageCost;
-    public double unrealizedPNL;
-    public double realizedPNL;
-    public double targetAllocation;
-    public double currentAllocation;
-    public String currency;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 
-    public Position(Contract contract, String accountName, Decimal position, double marketPrice, double marketValue,
-                    double averageCost, double unrealizedPNL, double realizedPNL, double targetAllocation, double currentAllocation) {
-        this.symbol = contract.symbol();
-        this.accountName = accountName;
-        this.position = position;
-        this.marketPrice = marketPrice;
-        this.marketValue = marketValue;
-        this.averageCost = averageCost;
-        this.unrealizedPNL = unrealizedPNL;
-        this.realizedPNL = realizedPNL;
-        this.targetAllocation = targetAllocation;
-        this.currentAllocation = currentAllocation;
-        this.currency = contract.currency();
-    }
+public class Position {
+
+    public Contract contract;
+    public String accountName;
+    public Decimal position; // IBKR usa Decimal per le quantità
+    public BigDecimal marketPrice;
+    public BigDecimal marketValue;
+    public BigDecimal averageCost;
+    public BigDecimal unrealizedPNL;
+    public BigDecimal realizedPNL;
+    public BigDecimal targetAllocation;
+    public BigDecimal currentAllocation;
 
     public Position(Contract contract, String accountName, Decimal position, double marketPrice, double marketValue,
                     double averageCost, double unrealizedPNL, double realizedPNL) {
-        this.symbol = contract.symbol();
+        this.contract = contract;
         this.accountName = accountName;
         this.position = position;
-        this.marketPrice = marketPrice;
-        this.marketValue = marketValue;
-        this.averageCost = averageCost;
-        this.unrealizedPNL = unrealizedPNL;
-        this.realizedPNL = realizedPNL;
-        this.targetAllocation = targetAllocation;
-        this.currentAllocation = currentAllocation;
-        this.currency = contract.currency();
+        this.marketPrice = BigDecimal.valueOf(marketPrice).setScale(2, RoundingMode.HALF_UP);
+        this.marketValue = BigDecimal.valueOf(marketValue).setScale(2, RoundingMode.HALF_UP);
+        this.averageCost = BigDecimal.valueOf(averageCost).setScale(2, RoundingMode.HALF_UP);
+        this.unrealizedPNL = BigDecimal.valueOf(unrealizedPNL).setScale(2, RoundingMode.HALF_UP);
+        this.realizedPNL = BigDecimal.valueOf(realizedPNL).setScale(2, RoundingMode.HALF_UP);
+        this.targetAllocation = BigDecimal.ZERO;
+        this.currentAllocation = BigDecimal.ZERO;
     }
 
-    // Metodo toString per debug
     @Override
     public String toString() {
-        return "Stock{" +
-                "symbol='" + symbol + '\'' +
-                ", accountName='" + accountName + '\'' +
-                ", position=" + position +
-                ", marketPrice=" + marketPrice +
-                ", marketValue=" + marketValue +
-                ", averageCost=" + averageCost +
-                ", unrealizedPNL=" + unrealizedPNL +
-                ", realizedPNL=" + realizedPNL +
-                ", targetAllocation=" + targetAllocation +
-                ", currentAllocation=" + currentAllocation +
-                ", currency='" + currency + '\'' +
-                '}';
+        return String.format("Position{Symbol='%s', Account='%s', Position=%s, MarketPrice=%s, MarketValue=%s, AverageCost=%s, UnrealizedPNL=%s, RealizedPNL=%s, TargetAllocation=%s, CurrentAllocation=%s, Currency='%s'}",
+                contract.symbol(), accountName, position, marketPrice, marketValue, averageCost,
+                unrealizedPNL, realizedPNL, targetAllocation, currentAllocation, contract.currency());
     }
+
 }

@@ -107,7 +107,11 @@ public class ClientWrapper implements EWrapper {
 
     @Override
     public void contractDetails(int i, ContractDetails contractDetails) {
-
+        if (this.observers.containsKey("contractDetails")) {
+            for (Observer o : this.observers.get("contractDetails")) {
+                o.notify("contractDetails", contractDetails);
+            }
+        }
     }
 
     @Override
@@ -408,7 +412,11 @@ public class ClientWrapper implements EWrapper {
 
     @Override
     public void marketRule(int i, PriceIncrement[] priceIncrements) {
-
+        if (this.observers.containsKey("marketRule")) {
+            for (Observer o : this.observers.get("marketRule")) {
+                o.notify("marketRule", priceIncrements);
+            }
+        }
     }
 
     @Override

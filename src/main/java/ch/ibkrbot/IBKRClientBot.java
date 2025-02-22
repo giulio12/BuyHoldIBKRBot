@@ -2,10 +2,11 @@ package ch.ibkrbot;
 
 import com.ib.client.*;
 
-import java.util.List;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Semaphore;
 
 public class IBKRClientBot {
     private EClientSocket socket;
@@ -14,7 +15,6 @@ public class IBKRClientBot {
     private final Portfolio portfolio;
     private final TradeGenerator tradeGenerator;
     private CountDownLatch latch;
-
 
     public IBKRClientBot() {
         readerSignal = new EJavaSignal();
@@ -26,40 +26,41 @@ public class IBKRClientBot {
     }
 
     public void initObserver() {
-        this.clientWrapper.addObserver("accountSummary", new Observer() {
-            @Override
-            public void notify(String notificationName, Object data) {
-                Balance b = (Balance) data;
-                switch (b.balanceType) {
-                    case "TotalCashBalance" -> portfolio.addCashBalance(b.currency, b.balance);
-                    case "ExchangeRate" -> portfolio.addExchangeRate(b.currency, b.balance);
-                    case "StockMarketValue" -> portfolio.addStockMarketValue(b.currency, b.balance);
-                }
+        this.clientWrapper.addObserver("accountSummary", (notificationName, data) -> {
+            Balance b = (Balance) data;
+            BigDecimal balanceValue = BigDecimal.valueOf(b.balance);
+            switch (b.balanceType) {
+                case "TotalCashBalance" -> portfolio.addCashBalance(b.currency, balanceValue);
+                case "ExchangeRate" -> portfolio.addExchangeRate(b.currency, balanceValue);
+                case "StockMarketValue" -> portfolio.addStockMarketValue(b.currency, balanceValue);
             }
         });
-        this.clientWrapper.addObserver("accountSummaryEnd", new Observer() {
-            @Override
-            public void notify(String notificationName, Object data) {
-                for (String curry : portfolio.getAllCurry()) {
-                    double xrate = portfolio.getExchangeRate(curry);
 
-                    double totalStockMarketValue = portfolio.getStockMarketValue("BASE");
-                    portfolio.addTotalStockMarketValue(curry, totalStockMarketValue / xrate);
+        this.clientWrapper.addObserver("accountSummaryEnd", (notificationName, data) -> {
+            for (String curry : portfolio.getAllCurry()) {
+                BigDecimal xrate = portfolio.getExchangeRate(curry);
+                BigDecimal totalStockMarketValue = portfolio.getStockMarketValue("BASE");
+                portfolio.addTotalStockMarketValue(curry, totalStockMarketValue.divide(xrate, 2, RoundingMode.HALF_UP));
 
-                    double totalCashBalance = portfolio.getCashBalance("BASE");
-                    portfolio.addTotalCashBalance(curry, totalCashBalance / xrate);
-                }
-                latch.countDown();
+                BigDecimal totalCashBalance = portfolio.getCashBalance("BASE");
+                portfolio.addTotalCashBalance(curry, totalCashBalance.divide(xrate, 2, RoundingMode.HALF_UP));
             }
+            latch.countDown();
         });
-        this.clientWrapper.addObserver("updatePortfolio", new Observer() {
-            @Override
-            public void notify(String notificationName, Object data) {
-                Position p = (Position) data;
-                p.targetAllocation = portfolio.getTargetAllocations(p.symbol);
-                p.currentAllocation = p.marketValue / portfolio.getTotalStockMarketValue(p.currency);
-                portfolio.addPosition(p);
+
+        this.clientWrapper.addObserver("updatePortfolio", (notificationName, data) -> {
+            Position p = (Position) data;
+            p.targetAllocation = portfolio.getTargetAllocations(p.contract.symbol());
+
+            // Ensure that total stock market value is not zero to avoid division errors
+            BigDecimal totalStockMarketValue = portfolio.getTotalStockMarketValue(p.contract.currency());
+            if (totalStockMarketValue.compareTo(BigDecimal.ZERO) > 0) {
+                p.currentAllocation = p.marketValue.divide(totalStockMarketValue, 4, RoundingMode.HALF_UP);
+            } else {
+                p.currentAllocation = BigDecimal.ZERO; // Default if total market value is zero
             }
+
+            portfolio.addPosition(p);
         });
     }
 
@@ -72,8 +73,8 @@ public class IBKRClientBot {
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
-        placeDomestiOrder();
-
+        placeDomesticOrder();
+        convertDomestictCash();
     }
 
     private int getReqIdCounter() {
@@ -90,7 +91,7 @@ public class IBKRClientBot {
         this.socket.reqIds(0);
 
         try {
-            return future.get(); // Attende il risultato senza busy-waiting
+            return future.get(); // Waits for the result without busy-waiting
         } catch (Exception e) {
             throw new RuntimeException(e);
         } finally {
@@ -140,11 +141,104 @@ public class IBKRClientBot {
         System.out.println(portfolio);
     }
 
-    public void placeDomestiOrder() {
-        List<TradeInstruction> trades = this.tradeGenerator.generatedDomesticOrders(portfolio);
+    public void placeDomesticOrder() {
+        List<TradeInstruction> trades = this.tradeGenerator.createDomesticOrders(portfolio);
         for (TradeInstruction t : trades) {
             int reqId = getReqIdCounter();
-            socket.placeOrder(reqId, t.getContract(), t.getOrder());
+            BigDecimal tick = getTick(t.getContract(), BigDecimal.valueOf(t.getOrder().lmtPrice()));
+
+            t.setTick(tick);
+
+            BigDecimal lmtPrice = BigDecimal.valueOf(t.getOrder().lmtPrice());
+            BigDecimal quantity = BigDecimal.valueOf(t.getOrder().totalQuantity().longValue());
+            BigDecimal spentAmount = lmtPrice.multiply(quantity).setScale(2, RoundingMode.HALF_UP);
+
+            System.out.println("Placing order " + t.getContract().symbol() +
+                    " Quantity: " + t.getOrder().totalQuantity() +
+                    " LMT Price: " + lmtPrice);
+           // this.socket.placeOrder(reqId, t.getContract(), t.getOrder());
+            this.portfolio.reduceCashPosition(spentAmount, t.getContract().currency());
+
+            System.out.println("Total Spent amount " + spentAmount);
+        }
+        System.out.println("Remaining CHF " + this.portfolio.getCashBalance("CHF"));
+    }
+
+    public void convertDomestictCash() {
+        BigDecimal remainingChf = portfolio.getCashBalance(Constants.BASE_CURRY);
+
+        if (remainingChf.compareTo(BigDecimal.ZERO) > 0) {
+            int reqId = getReqIdCounter();
+            TradeInstruction t = this.tradeGenerator.createForexOrder("CHF", "USD", BigDecimal.valueOf(99.1));
+
+            System.out.println("Placing forex order From: " + t.getContract().symbol() +
+                    " To: " + t.getContract().currency() +
+                    " Quantity: " + t.getOrder().totalQuantity() +
+                    " LMT Price: " + t.getOrder().lmtPrice() +
+                    " Is Market Order: " + t.isMarketOrder());
+
+            this.socket.placeOrder(reqId, t.getContract(), t.getOrder());
+        } else {
+            System.out.println("No CHF balance available for conversion.");
         }
     }
+
+    private ContractDetails getContractDetails(Contract contract) {
+        CompletableFuture<ContractDetails> future = new CompletableFuture<>();
+
+        Observer o = new Observer() {
+            @Override
+            public void notify(String notificationName, Object data) {
+                future.complete((ContractDetails) data);
+            }
+        };
+        this.clientWrapper.addObserver("contractDetails", o);
+        int reqId = getReqIdCounter();
+        this.socket.reqContractDetails(reqId, contract);
+
+        try {
+            return future.get();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            this.clientWrapper.removeObserver("contractDetails", o);
+        }
+    }
+
+    public BigDecimal getTick(Contract contract, BigDecimal currentPrice) {
+        BigDecimal tick = BigDecimal.valueOf(0.05); // Default tick
+        ContractDetails contractDetails = getContractDetails(contract);
+        String marketRuleIds = contractDetails.marketRuleIds();
+        List<Integer> marketRuleIdsList = Util.parseMarketRuleIds(marketRuleIds);
+
+        CompletableFuture<PriceIncrement[]> future = new CompletableFuture<>();
+
+        Observer o = new Observer() {
+            @Override
+            public void notify(String notificationName, Object data) {
+                future.complete((PriceIncrement[]) data);
+            }
+        };
+        this.clientWrapper.addObserver("marketRule", o);
+
+        for (Integer i : marketRuleIdsList) {
+            this.socket.reqMarketRule(i);
+        }
+
+        try {
+            PriceIncrement[] priceIncrements = future.get();
+            for (PriceIncrement p : priceIncrements) {
+                if (BigDecimal.valueOf(p.lowEdge()).compareTo(currentPrice) > 0)
+                    break;
+                tick = BigDecimal.valueOf(p.increment());
+            }
+            return tick;
+        } catch (Exception e) {
+            System.err.println(e);
+            return tick;
+        } finally {
+            this.clientWrapper.removeObserver("marketRule", o);
+        }
+    }
+
 }
