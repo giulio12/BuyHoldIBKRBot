@@ -75,6 +75,13 @@ public class Portfolio {
         return positionList;
     }
 
+    public Position getPosition(String symbol){
+        for(Position pos : positionList)
+            if(pos.contract.symbol().equals(symbol))
+                return pos;
+        return null;
+    }
+
     public BigDecimal getCashBalance(String curry) {
         return cashBalances.getOrDefault(curry, BigDecimal.ZERO);
     }
@@ -98,6 +105,27 @@ public class Portfolio {
                 result.add(p.contract.currency());
         }
         return result;
+    }
+
+    public BigDecimal getTotalTargetAllocationForCurry(String curry) {
+        BigDecimal result = new BigDecimal(0);
+        for(Position p : this.positionList){
+            if(p.contract.currency().equals(curry))
+                result = result.add(p.targetAllocation);
+        }
+        return result;
+    }
+
+    public BigDecimal getTargetAllocationForCurry(String symbol, String curry) {
+        Position pos = getPosition(symbol);
+        assert pos != null : "pos cannot be null in getTargetAllocationForCurry";
+        return pos.targetAllocation.divide(getTotalTargetAllocationForCurry(curry));
+    }
+
+    public BigDecimal getCurrentAllocationForCurry(String symbol, String curry) {
+        Position pos = getPosition(symbol);
+        assert pos != null : "pos cannot be null in getTargetAllocationForCurry";
+        return pos.currentAllocation.divide(getTotalTargetAllocationForCurry(curry));
     }
 
     @Override

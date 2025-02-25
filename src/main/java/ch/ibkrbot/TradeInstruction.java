@@ -58,6 +58,7 @@ public class TradeInstruction {
             }
         }
 
+
         this.order = order;
         this.tick = Constants.TICK_SIZE; // Default tick size
         this.isMarketOrder = isMarketOrder;

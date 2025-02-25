@@ -115,12 +115,6 @@ public class PortfolioOptimizationTestUSD {
             }
         }
 
-
-
-
-
-
-
         // Risoluzione del modello
         Optimisation.Result result = model.maximise();
 

@@ -74,7 +74,8 @@ public class IBKRClientBot {
             throw new RuntimeException(e);
         }
         placeDomesticOrder();
-        convertDomestictCash();
+    //    convertDomestictCash();
+        placeForeignOrder();
     }
 
     private int getReqIdCounter() {
@@ -142,7 +143,7 @@ public class IBKRClientBot {
     }
 
     public void placeDomesticOrder() {
-        List<TradeInstruction> trades = this.tradeGenerator.createDomesticOrders(portfolio);
+        List<TradeInstruction> trades = this.tradeGenerator.createDomesticTrades(portfolio);
         for (TradeInstruction t : trades) {
             int reqId = getReqIdCounter();
             BigDecimal tick = getTick(t.getContract(), BigDecimal.valueOf(t.getOrder().lmtPrice()));
@@ -169,7 +170,7 @@ public class IBKRClientBot {
 
         if (remainingChf.compareTo(BigDecimal.ZERO) > 0) {
             int reqId = getReqIdCounter();
-            TradeInstruction t = this.tradeGenerator.createForexOrder("CHF", "USD", BigDecimal.valueOf(99.1));
+            TradeInstruction t = this.tradeGenerator.createForexOrder("USD", "CHF", remainingChf);
 
             System.out.println("Placing forex order From: " + t.getContract().symbol() +
                     " To: " + t.getContract().currency() +
@@ -177,10 +178,33 @@ public class IBKRClientBot {
                     " LMT Price: " + t.getOrder().lmtPrice() +
                     " Is Market Order: " + t.isMarketOrder());
 
-            this.socket.placeOrder(reqId, t.getContract(), t.getOrder());
+        //    this.socket.placeOrder(reqId, t.getContract(), t.getOrder());
         } else {
             System.out.println("No CHF balance available for conversion.");
         }
+    }
+
+    public void placeForeignOrder() {
+        List<TradeInstruction> trades = this.tradeGenerator.createForeignTrades(portfolio, "USD");
+        for (TradeInstruction t : trades) {
+            int reqId = getReqIdCounter();
+            BigDecimal tick = getTick(t.getContract(), BigDecimal.valueOf(t.getOrder().lmtPrice()));
+
+            t.setTick(tick);
+
+            BigDecimal lmtPrice = BigDecimal.valueOf(t.getOrder().lmtPrice());
+            BigDecimal quantity = BigDecimal.valueOf(t.getOrder().totalQuantity().longValue());
+            BigDecimal spentAmount = lmtPrice.multiply(quantity).setScale(2, RoundingMode.HALF_UP);
+
+            System.out.println("Placing order " + t.getContract().symbol() +
+                    " Quantity: " + t.getOrder().totalQuantity() +
+                    " LMT Price: " + lmtPrice);
+            // this.socket.placeOrder(reqId, t.getContract(), t.getOrder());
+            this.portfolio.reduceCashPosition(spentAmount, t.getContract().currency());
+
+            System.out.println("Total Spent amount " + spentAmount);
+        }
+        System.out.println("Remaining USD " + this.portfolio.getCashBalance("USD"));
     }
 
     private ContractDetails getContractDetails(Contract contract) {
